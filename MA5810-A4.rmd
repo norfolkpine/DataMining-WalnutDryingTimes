@@ -2,7 +2,7 @@
 ---
 title: 'A TOUGH NUT TO CRACK: INVESTIGATING THE OPTIMAL DRYING TIME FOR WALNUTS?'
 author:
-- Nick Moellers
+- Nick Moellers 
 date: 'Due: 21 August 2019'
 output:
   html_document: default
