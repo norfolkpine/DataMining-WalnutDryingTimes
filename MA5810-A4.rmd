@@ -1,0 +1,414 @@
+
+---
+title: 'A TOUGH NUT TO CRACK: INVESTIGATING THE OPTIMAL DRYING TIME FOR WALNUTS?'
+author:
+- norfolkpine
+date: 'Due: 21 August 2019'
+output:
+  html_document: default
+#  #pdf_document: default
+#  pdf_document:
+#    fig_caption: yes
+#    pandoc_args:
+#    - -V
+#    - classoption=twocolumn
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include = FALSE}
+
+library("dbscan")
+library(reshape2)
+library(ggplot2)
+library("plot3D")
+library(plotly)
+library(class)
+library(ROCR)
+library(dplyr)
+library(tidyr)
+library(MASS)
+library(caret)
+
+```
+
+
+```{r HullerData, include = FALSE}
+
+#load the data file
+getwd()
+setwd("DataMining\\A4")
+
+HullerData <- read.table("HullerHistory.csv", header = TRUE, sep = ",", quote = "\"'", dec = ".", na.strings = c("","NA"))
+HullerData <- na.omit(HullerData)
+#HullerData <- HullerData %>% filter(Variety == "Vina" | Variety == "Lara" | Variety == "Serr" | Variety == "Serr" )
+Predictors <-  dplyr::select(HullerData, Variety, BinName, ElapsedSeconds, EndMoisture, CertWgt,Acceptable) # predictors
+PB_Predictors <-  dplyr::select(HullerData, ElapsedSeconds, EndMoisture, CertWgt)
+Variety <-  dplyr::select(HullerData,Variety)
+
+#PB_Class <- select(HullerDataFiltered, Acceptable)
+PB_class <- HullerData[,14] # Class labels (V10)
+PB_class <- ifelse(PB_class == 'no',0,1) # Inliers (class "no") = 0, Outliers (class "yes") = 1
+
+summary(HullerData)
+
+#Suppress Warnings
+options( warn = -1 )
+
+```
+
+### ABSTRACT
+
+Walnuts are grown in several varieties such as Serr, Ashley, Tehama, Lara, Vina, Tulare, Howard, Chandler, and Franquette. Favouring a temperate climate, walnuts trees require extensive amounts of water, 600-800 hrs of temperatures below 7°C and not exceeding 38°C [1]. Whilst some nuts are harvested early with a moisture level of 60% others are harvested much later when the moisture level is 40%; before being hulled and dried using industrial blowers to get the nuts to an optimal moisture of 8%. This report investigates elapsed time for each variety in the industrial drying bins and resulting moisture levels.  
+
+The objective of this report is to identify any drying bins that may not be operating efficiently and to assist in predicting the drying time for each variety.  
+
+R Studio was used to create tables where data was grouped by BinName and Variety respectively. ElapsedSeconds was used to provide a numerical value for time.  
+
+The select() function from the dplyr was used to select all numerical variables: HullerData, Variety, BinName, ElapsedSeconds, EndMoisture, CertWgt. These variables form the dataset used in performing Linear Discriminate Analysis (LDA), Principal Component Analysis (PCA) and other data mining techniques. 
+Walnuts harvested during wet weather started the drying process with 99.99% moisture, to ensure consistent results, the lof() and kNNdist functions from the dbscan library [14] were used to calculate Local Outlier Factor Score and k-Nearest Neighbour Distance respectively. This was plotted against the first two principal components from the PCA results.  
+
+The LDA revealed the longest drying times on average were by Ashley and Serr, this corresponds with industry results [10] stating Ashley and Serr are most similar in harvest time.  
+
+The variance in Variety drying time correlated well with the different starting moisture of each Variety; on Average Ashley took the longest to dry, with the exception of Robinson Tulare, Howard and Chandler was the quickest. This also correlates with industry data [11] Howard is of interest as it had a starting temp of 50% moisture and dried in the same amount of time as Chandler that starts with 25% moisture.  
+
+Results from LDA and PCA predictions indicated an accuracy above 75%, given a training dataset size of 90%, to improve results would require an increase to the overall dataset size. Additionally, through the analysis of lda results, it could be determined which Varieties are produce the most accurate results and subset created containing only those varieties.  
+
+It can be concluded from this investigation that walnut drying times depend heavily on the efficiency of the drying bin, proximity to hot air blowers, size of the nut and starting moisture. By utilising this report, staff can implement better procedures for drying bin maintenance and more effectively estimate the drying time required for each walnut variety.  
+
+### INTRODUCTION
+The largest Australian walnut plantations are in the Riverina of New South Wales, Gapsted in Victoria and the East Coast of Tasmania. [12] Whilst some varieties of walnut are harvested when the walnut reaches 60% moisture, other varieties such as Chandler are harvested at 25% having spent more time naturally drying on the tree. Once harvested walnuts are hulled, sorted and placed in drying bins with the operator seeking to ascertain and mean moisture level of 8%. [3] In practice, this process relies on the operators experience and intuition when interpreting data rather than a formalised analytical process. Current processes are inconsistent in estimation of drying times and vary between bins, given 122 different bins exist, a more thorough analysis of individual varieties and bin performance is required.  
+
+End moisture levels outside the accepted range result in a sub optimal product, reduced yield and reduced profits for the business. The goal of this report is to investigate drying times and form correlations between varieties, end moisture level, elapsed time (seconds), and weight to aid in the prediction of required drying time. Furthermore, this report seeks to evaluate the effectiveness of predictive models and identify inconsistencies between each bin. It is hoped this will assist in standardising the drying process.   
+
+Records containing incomplete fields were removed from the dataset along with Walnut varieties that did not represent a significant portion of the overall data, these exceptions provided inconsistent results and reduced accuracy whilst performing the Exploratory Data Analysis.  
+
+Through the analysis of data and various data mining techniques, this report seeks to formulate optimal drying times and consistently produce dried walnuts with a moisture level of 8%, thus producing a more consistent product, reducing costs and maximising profits.  
+
+### DATA
+
+Data was exported from a database linked to the production system. As part of the production system, walnuts are sorted, cleaned, hulled and transported along a conveyor belt to the drying bins. Each bin contains sensors that assist in recording time, moisture and weight. Walnuts were harvested by 29 different growers, utilised 122 separate bins for drying and consisted of 12 varieties. Taking into consideration location, varieties increases to 19. Furthermore, to ensure a diversity, walnuts were grown in 417 blocks/block combinations.  
+
+When sampling the data, the 2018 harvest was chosen from a dataset containing the last 5 years observations. It consists of 1870 rows. The data set is already diverse in that it includes different varieties of Walnuts, from different growers in different states. Having this diversity means there is no sampling bias. One could suggest bias on a given year, however by including walnuts grown from different states, this overcomes any bias attributed to shared weather patterns, rainfall and water availability for a given year.  
+
+The raw data consists of 12 variables, consisting of:  
+**One Ratio Numerical variable:** weight;  
+**Five Categorical Nominal variables:**    
+
+* BinName:	Bin used to dry the walnuts, there are 122 different bins
+* Grower:	Excluded from the analysis
+* Variety:	There exist 12 unique varieties in the data set
+* Buyer:	Excluded
+* Block:	Excluded  
+
+**Five Continuous Numerical variables:**   
+
+* FilledTime:	Date/Time filling into the bin commenced
+* EmptiedTime:	Date/Time bin was emptied
+* ElapsedTime:	Time spent drying
+* EndMoisture:	Moisture as a percentage after drying completed
+* ShippedOn:	Excluded
+
+**Categorical Binary:**   
+
+* Acceptable: used to indicate if the EndMoisture is acceptable according to food safety standards.
+
+The following variables were used as part of the analysis with the exclusion of all others: HullerData, Variety, BinName, ElapsedSeconds, EndMoisture, CertWgt. By using elapsed seconds rather than elapsed minutes allows for easier handling of data and improved accuracy of predictions.  
+Prior to the interventions described in this section of the report, a variable called Acceptable was added to assist in supervised learning. Acceptable was calculated where EndMoisture is less than 12% and greater than 2%. This could be done in R using threshold variables and the mutate() function to add a new column to a dataframe. Industry standards state that walnuts must be dried below 12% to prevent mould growth in storage.[3]  
+
+
+### METHODS  
+
+During the investigation, primary variables focussed on were, ElapsedSeconds, EndMoisture, BinName, CertWeight, Acceptable and Variety. Given stringent requirements for traceability in the walnut industry, these specific variables did not contain any missing values. However, if missing values existed, missing values imputation could be performed to fill in the blanks, such an example may use a nearest neighbour algorithm which utilises the knn() function in R. The na.omit was used to ensure any potential null values were removed.  
+
+Firstly, the raw data was edited in Excel to add a column called Acceptable where EndMoisture is less than twelve. This was performed prior to receipt of the data. RStudio (version 1.1.463) was then used to import data from the .csv file into a table. The select() function from the dplyr library [13] was used to create a data frame, Predictors,  consisting of Variety, BinName, ElapsedSeconds, EndMoisture, CertWgt, Acceptable. The data frame was then separated into three data frames with Variety and Acceptable being their own data frame respectively.  
+
+The data was then split into a 90% Training data and 10% Test data before using a Linear Discriminant Analysis (LDA) classifier with Variety as the dependent variable. This did not result in a perfect classification, however this is to be expected given the similarity between varieties. As such, the dependent variable was changed to Acceptable, this produced more accurate results. Further information was gained by generating a confusion matrix. Next the LDA results were used with the Acceptable variable from the test data to construct a ROC AUC plot (Area under the curve) [19]. This produced an AUC value of 0.759.
+
+#### **Linear Discriminant Analysis (LDA) Classifier**
+
+```{r LDA}
+set.seed(0)
+no_obs <- dim(Predictors)[1] # No. of observations
+test_index <- sample(no_obs, size = as.integer(no_obs*0.10), replace = FALSE) # 10% data records for test
+training_index <- -test_index # 90% data records for training
+
+lda.fit <- lda(Acceptable ~., data=Predictors, subset = training_index)
+## LDA fit results
+lda.fit
+
+## Prior probabilities of groups:
+##        no       yes 
+## 0.1311155 0.8688845
+
+## Prior probabilities of groups:
+##            Ashley           Chandler   Gapsted Chandler Gapsted Franquette             Howard               Lara 
+##       0.010437052        0.180691455        0.001304631        0.007827789        0.153946510        0.206784083 
+##             Mixed    Robinson Tulare               Serr             Tehama             Tulare               Vina 
+##       0.015003262        0.003261579        0.065883888        0.001956947        0.025440313        0.327462492 
+
+##     ElapsedSeconds EndMoisture  CertWgt
+## no        89148.23    9.797512 9200.149
+## yes       74685.69    5.290240 8507.851
+
+lda.pred <- predict(lda.fit, Predictors[test_index,])
+
+lda.Pred_class <- lda.pred$class 
+## Contigency Table
+cont_tab <- table(lda.Pred_class, Predictors$Acceptable[test_index])
+#cont_tab
+## Confusion Matrix
+confusionMatrix(lda.pred$class, Predictors$Acceptable[test_index])
+```
+
+```{r AUC-Plot, include = TRUE}
+#Create ROCPlot function for calculating AUC
+rocplot <- function(pred, truth){
+  predobj <- prediction(pred, truth)
+  ROC     <- performance(predobj, "tpr", "fpr")
+  # Plot the ROC Curve
+  plot(ROC)   
+  auc     <- performance(predobj, measure = "auc")
+  auc     <- auc@y.values[[1]]
+  # Return the Area Under the Curve ROC
+  return(auc) 
+}
+
+### CONSTRUCTING ROC AUC PLOT:
+# Get the posteriors as a dataframe.
+lda.predict.posteriors <- as.data.frame(lda.pred$posterior)
+# Evaluate the model
+pred <- prediction(lda.predict.posteriors[,2], Predictors[test_index,]$Acceptable)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+# Plot
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .25, y = .65 ,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+```
+
+The best predictions were ascertained on Vina. Upon doing research on Walnut varieties, it was found Vina and Lara are most similar with both having the longest drying times [10].  
+
+Next, Principal Component Analysis (PCA) was run using PB_Predictors. PB_Predictors contains all numerical variables: ElapsedSeconds, EndMoisture, CertWgt. The PCA results were then show the Proportion of Variance Explained (PVE) for each of the principal components. The cumulated sum of PVE for the first m components, as a function of m for the first m components. This resulted in 75% of the data being described by the first two principal components.   
+
+#### **Perform Principal Component Analysis (PCA) on the numerical predictors**
+```{r PCA, warning=FALSE, echo = FALSE}
+
+HullerData.PCA <- prcomp(PB_Predictors, scale. = TRUE) #PCA step
+#HullerData.PCA
+#show the Proportion of Variance Explained (PVE) for each of the nine resulting principal components
+(PVE <- (HullerData.PCA$sdev^2)/sum(HullerData.PCA$sdev^2)) #PVE step
+
+##Plot the accumulated sum of PVE for the first m components, as a function of m, and discuss the result:  
+cumPVE <- cumsum(PVE)
+plotCumPVE <- qplot(c(1:3), cumPVE) + 
+  geom_line() + 
+  xlab("Principal Component") + 
+  ylab(NULL) + 
+  ggtitle("Cumulative Sum PVE Plot") +
+  ylim(0,1)
+#grid.arrange(PVEplot, cumPVE, ncol = 2)
+plotCumPVE
+#cumsum(PVE)
+```
+
+```{r PCA-Plot,warning=FALSE,message=FALSE, echo = FALSE}
+#Select first three principal components
+HullerData.PCA.3D <- as.data.frame(HullerData.PCA$x[,1:3])
+
+#Create data frame with first three principal components and class labels
+scatter.data <- cbind.data.frame(HullerData.PCA.3D, Variety)
+
+```
+
+The lof() function was used with a k value of 50 on PB_Predictors  to calculate Local Outlier Factor Score and rank them in a decreasing order. Predictors was then combined with the LOF values to produce another dataframe. Next ggplot() was used to generate a scatter plot using the first two principal components, with the top 100 identified outliers being coloured red. Scores close to 1 indicate the density around the point is comparable to its neighbors. Scores significantly larger than 1 indicate outliers. Using the LOF data frame created earlier, ggplot() [8] was used to visualise EndMoisture results over time in a scatter graph (Figure 1). Green is used to indicate values inside the acceptable range and red for values outside the acceptable range. Having an understanding now of the data, a further subset was created by filtering out all outside the acceptable range; the used the filter() function. Additionally, na.omit() was used to remove any blank values that may be left.
+
+
+```{r PCA2}
+top_n <- 100
+PCA <- prcomp(PB_Predictors, scale = TRUE)
+PCA$rotation
+(PVE <- (PCA$sdev^2)/sum(PCA$sdev^2))
+```
+
+```{r PCA3, include = FALSE}
+
+PCA_2D_dat <- as.data.frame(PCA$x[,1:2])
+
+```
+
+```{r PCA-PLOT, results='hide'}
+g_PCA <- ggplot() + geom_point(data=PCA_2D_dat, mapping=aes(x=PC1, y=PC2), shape = 19)
+
+```
+
+```{r LOF-Outliers, echo = FALSE}
+k <- 50
+LOF_Outlier <- lof(x=PB_Predictors, k = k)
+
+ # Merge top_n dataframe with pcaStamps dataframe
+lofData <- cbind.data.frame(Predictors, LOF_Outlier)
+
+rank_LOF_Outlier <- order(x=LOF_Outlier, decreasing = TRUE)
+rank_LOF_Outlier[1:top_n]
+
+
+(g_LOF_top_n <- g_PCA +
+ geom_point(data=PCA_2D_dat[rank_LOF_Outlier[1:top_n],],mapping=aes(x=PC1,y=PC2),shape=19,color="red1",size=2)+labs(title = "PCA Analysis"))
+rank_LOF_Outlier[1:top_n]
+
+HullerData.lof <- lofData %>% filter(LOF_Outlier<1.5)
+
+acceptedTargetMin <- 2
+acceptedTargetMax <- 12
+#plot time, moisture
+ggplot(HullerData.lof, aes(x=HullerData.lof$ElapsedSeconds, y=HullerData.lof$EndMoisture,  colour = abs(HullerData.lof$EndMoisture) < acceptedTargetMax & abs(HullerData.lof$EndMoisture) > acceptedTargetMin )) + geom_point() +
+  scale_colour_manual(name = '2 < EndMoisture < 12', values = setNames(c('green','red'),c(T, F))) +  xlab('Elapsed Time') + ylab('EndMoisture') + ggtitle("EndMoisture Results") +  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+In addition to the 2D scatter plot, a 3D plot was created using plot_ly [9]. Firstly, the apply and sweep functions were used alongside a magnitude function to scale the data. Next, kNNdist was used with a k value of 50 to calculate the KNN Outlier score. This score was then ranked in decreasing order and joined to the PCA results using cbind.data.frame(). The top n was calculated at 20% of the KNN results and then merge was used to combine the top n KNN results with the dataframe on the ID column. This column contains values for the top n values and NA for the rest.  NA’s were then set to 0 and values set to 1. Next, plot_ly [9] was used to produce the 3D scatter plot with outliers being colour red.   
+
+```{r KNN, warning = FALSE}
+
+## create magnitude function
+magnitude <- function(x) {
+  sqrt(sum(x^2))
+}
+
+
+kay <- 50
+
+HullerData.PCA.3D.Mag <- apply(HullerData.PCA.3D,1,magnitude)
+HullerData.PCA.3D2 <- sweep(HullerData.PCA.3D,1,HullerData.PCA.3D.Mag,"/")
+KNN_Outlier <- kNNdist(x=PB_Predictors, k = kay) # KNN distance (outlier score) computation
+
+  #print(var)
+  #The following code sorts the observations according to their KNN outlier scores and displays the top 20 outliers along with their scores:
+
+  # No. of top outliers to be displayed
+rank_KNN_Outlier <- order(x=KNN_Outlier, decreasing = TRUE) # Sorting (descending)
+KNN_Result <- data.frame(ID = rank_KNN_Outlier, score = KNN_Outlier[rank_KNN_Outlier])
+top_np <- nrow(KNN_Result) *0.20 # 20% of the KNN Results df
+  
+  
+HullerData.PCA.3D2 <- cbind.data.frame(HullerData.PCA.3D, KNN_Result)
+  #Create dataframe of top n outliers
+KNN_Result.top_np <- head(KNN_Result, top_np) 
+  # Merge top_n dataframe with pcaStamps dataframe
+HullerData.PCA.3D2 <- merge(HullerData.PCA.3D2,KNN_Result.top_np, by  = "ID", all.x=TRUE)
+  
+HullerData.PCA.3D2$score.y[is.na(HullerData.PCA.3D2$score.y)] <- 0
+HullerData.PCA.3D2$score.y[HullerData.PCA.3D2$score.y>0] <- 1
+  
+  #Top n results contain a value in one of the added columns, whilst the rest are marked as NA
+  # colour top n red, and NA's black
+  #Output colour
+
+plotto <- plot_ly(HullerData.PCA.3D2, x = ~PC1 , y = ~PC2, z = ~PC3, color = ~score.y, colors = c("black","red"))
+plotto
+
+```
+
+Of particular interest is the Elapsed time for each variety, given it is a large dataset, the mean elapsed time was calculated for each variety using the aggregate() function. This value was then converted to minutes to allow easier calculations whilst maintaining readability.  
+
+Finally, using the dataframe containing only acceptable EndMoisture values, ggplot was used to generate a line graph visualising the Average Elapsed Minutes for each variety. This visualisation will assist in predicting drying time specific to each variety.  
+
+```{r, LOF}
+lofData.Filtered <- na.omit(lofData)
+# average moisture
+groupAverageMoisture <- aggregate(HullerData$EndMoisture, by=list(Variety=HullerData$Variety), FUN=mean)
+groupAverageMoisture %>% na.omit()
+
+#Calculate Average Elapsed Time per Bin
+groupAverageTime <- aggregate(HullerData$ElapsedSeconds, by=list(Variety=HullerData$Variety), FUN=mean) 
+groupAverageTime <- mutate(groupAverageTime, ElapsedMinutes = x / 60)
+groupAverageTime
+
+xlabel <- "X axis"
+plot_ly(groupAverageMoisture, x = groupAverageMoisture$BinName, y = groupAverageMoisture$x, type = "bar", name = "EndMoisture") %>% 
+  add_trace(x = groupAverageTime$BinName, y = groupAverageTime$ElapsedMinutes, modee = "lines",  yaxis = "y2", name = "ElapsedTime (m)") %>%
+  layout(yaxis2 = list(overlaying = "y", side = "right",xaxis = xlabel, yaxis = 'y'))
+citation(package = "ggplot2")
+
+# Group average time by Variety
+groupAverageTimeR <- aggregate(lofData.Filtered$ElapsedSeconds, by=list(Variety=lofData.Filtered$Variety), FUN=mean) 
+groupAverageTimeR <- mutate(groupAverageTimeR, ElapsedMinutes = x / 60)
+groupAverageTimeR
+
+ggplot(data = groupAverageTimeR) + geom_line(stat = "identity", group = 1, mapping = aes(x =Variety, y = ElapsedMinutes))  + ggtitle("Average Elapsed Minutes for each Variety w/ Acceptable EndMositure") +  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### RESULTS AND DISCUSSION
+Preliminary investigations revealed an EndMoisture results were concentrated in the region below 9% moisture. A fraction of the sample existed spread out >10% moisture, with most of these outliers occurring when the elapsed time was shortest. The results also showed a concentrated bar below the acceptable threshold of 6%. This is representative of the need to have end moisture reading 8% and below to ensure the nuts are safely stored [2]. After filtering the data where the LOF was below 1.5, some outliers still existed. Further inspection of the outliers revealed that correlated with the elapsed time. This can be seen in Figure 1, with the greatest outliers having the shortest elapsed time The objective of this report is to assist staff in getting results closer to the ideal 8%.   
+
+Based on industry research [3], a maximum threshold of 12% and minimum of 2% was set for the end moisture reading. Although 2% could be considered overdrying, it is preferential to over dry rather than under dry to ensure all nuts within the bin are dried below the maximum threshold [4]. Walnuts and other tree nuts exceeding the maximum threshold are more likely to exhibit mould growth, as such, within the industry it is more favourable to over dry the nuts. Data from the Weco Controls database [3] visualises current moisture reading against time. The results show right skewness that has similarities to exponential decay (See Figure 2). Initially, moisture levels drop quite sharply before more it plateaus, requiring significantly more energy expenditure to reduce the moisture level. 
+Tests conducted by Thompson and Grant [4] identified that as moisture content nears 8%, typical dryers require 3 to 4 hrs to reduce the moisture content by a single point. To reduce moisture content to the minimum threshold would require an additional 6-8 hrs of drying. This is also observed when reviewing the Weco Controls database (Figure 3). Thus, over drying of walnuts results in a significant waste of energy which may impact on production costs, increasing the carbon footprint of businesses, and overall resulting in a lower quality of product [4],[5].   
+
+Different varieties of walnuts are harvested at different times, combined with weather patterns this results in varying starting moisture data. One limitation of this is that walnuts harvested during the rain are identified as having a moisture content of 99.9%. For example, Ashley is harvested with 40% moisture content whilst Chandler is more commonly harvested at 25%.   
+
+The data contained a column acceptable, where EndMoisture values between 2% and 12% were marked as “yes”. Performing LDA against ElapsedSeconds, EndMoisture, CertWeight with Acceptable, resulted in Prior probabilities of groups no: 0.1311155; yes: 0.8688845. EndMoisture for no mean of 9.79 and yes: 5.29. Whilst the confusion matrix to test effectiveness of LDA produced an accuracy of 0.8059 and Mcnemar's Test P-Value of 0.0001 suggesting there is a strong correlation between EndMoisture and ElapsedSeconds. LDA was performed using a 90% training data and 10% test data. It would not be ideal to increase the size of the training data, however improved accuracy could be gained by increasing the size of the data set.   
+
+To test the effectiveness of the LDA, a ROCPlot function was used to calculate and plot the Area Under Curve (AUC). The calculated value for AUC was 0.759, this is considered an ok result for prediction, however values closer to 1 are preferred.  
+
+Performing PCA and calculating the resulting Proportion of Variance Explained (PVE), produced 0.3813068, 0.3550533, 0.2636399 that the resulting acceptable end moisture is more dependent on the Elapsed Time and End Moisture. This correlation is also seen when comparing the principal components for each variable. Visualising PC1 and PC2 in a scatter plot, the top 100 detected outliers can be seen in red. An estimation of the outliers highlighted corresponds to the LDA accuracy of 80%. This is comparable to the AUC results.  
+
+In comparison to the plot_ly scatter plot using the first three principal components and the KNN outlier score. The 3D plot is visually more difficult to detect outliers and may indicate errors within the predictions as a significant number of outliers exist within the primary cluster. As such, a greater focus is placed on the first two principal components.  
+
+Additionally, plotting the cumulative PVE, shows 75% of the results are explained by the first two principal components.  
+The LDA results were filtered for NA’s and placed into a dataframe, the aggregate() function was then used to calculate the mean EndMoisture mutate() used to group data by Mean EndMoisture. The results were then plotted with the EndMoisture and ElapsedTime being shown on the same bar chart.  
+
+Following on from this, Acceptable EndMoisture counts were compared for each variety. Favourable results were found for Vina, Lara, Tulare and Serr, whilst Chandler, TAS Lara and TAS Vina had unfavourable results. It is interesting that the Tasmanian varieties had less favourable results, to speculate, this may be attributed to the diversity between climate between Tasmanian orchards and those located on mainland Australia (See Figure 5). This knowledge will assist in tailoring drying times to suit each variety. Furthermore, it allows for fast identification and sorting into groups based on moisture content. If walnuts were first sorted into sub-groups based on the average or expected moisture content, the variation amongst walnuts may be reduced resulting in more effective drying practices. This would increase drying capacity, in turn speeding up the drying process, improve product quality and reduce energy costs [2].  
+
+One of the objectives of this report is to assist in predicting the optimal drying times to achieve 8% moisture content. To identify ideal times, only data that produced an acceptable EndMoisture reading is needed. As such, a subset consisting of only acceptable values was used to calculate Average EndMoisture and Average ElapsedMinutes grouped by Variety. The results can be seen in Figure 7. Looking at the results, one can see that Ashley which has a high starting moisture of 40% had the highest elapsed time, whilst Tulare had the shortest elapsed time. Tulare was also found to have the highest rate of acceptable results, drilling down reveals that Tulare bins had lower weights than all other varieties by roughly 2 tonnes, this indicates that greater accuracy and reduced energy expenditure may be gained by using smaller loads of walnuts in each bin. Further investigation is required to identify the impact on product quality, however this represents a reduction in production costs which may prove favourable in the long run.  
+
+
+### CONCLUSIONS
+The objective of this report is to assist in predicting required drying times for each batch of walnuts. The results of this investigation identified that End Moisture results could be predicted with an accuracy up to 80%. By comparing different supervised and unsupervised learning techniques, the algorithms used were proven to be reliable. The accuracy can be further improved by increasing the size of the dataset and focussing on the Vina variety. By calculating mean data and grouping using Variety, further insight to the second objective was achieved. Staff can now visually see by way of graphs the variation in drying times between each variety. By first detecting the starting moisture, then identifying the a matching variety or matching to a variety with similar starting moisture, staff are able to make an informed estimate on required starting time for subsequent harvests including those containing new varieties of walnuts. Using data collection and the data mining techniques described in this report, continually evaluations may be constructed to further improve results.  
+
+Further accomplishments can be achieved by sorting walnuts by starting moisture and reducing the weights loaded into bins. By drying walnuts closer to 8% with less energy, costs are reduced, and a better-quality product is produced, thus combining for increased returns on investment.
+
+### REFERENCES
+1.	Walnuts, 24 May 2017, Accessed 15 June 2019, Source: https://www.agrifutures.com.au/farm-diversity/walnuts/  
+2.	Ragab   Khir  and  Griffiths   G.   Atungulu  and  Zhongli   Pan  and  James   F.   Thompson  and  Xia   Zheng, Moisture-Dependent Color Characteristics of Walnuts,  International Journal of Food Properties 2014 , 17(4), 877-890  
+3.	Jim Thompson, Walnut Storage, Accessed 19 June 2019, Source: https://ucanr.edu/datastoreFiles/234-1265.pdf    
+4.	Thompson, J.F.; Grant, J.A. New moisture meter could curb over-drying of walnuts. California Agriculture 1992, 46(2), 31–34  
+5.	Rumsey, T.R.; Thompson, J.F. Ambient air drying of English walnuts. Transactions of the ASAE 1984, 27(3), 942–945.  
+6.	Brooker, D.B.; Bakker-Arkema, F.W.; Hall, C.W. Drying and Storage of Cereals and Oilseeds, AVI Publishing Co.: Westport, CT, 1992.  
+7.	RStudio Team (2016). RStudio: Integrated Development for R. RStudio, Inc., Boston, MA URL http://www.rstudio.com/. Version 1.1.463  
+8.	H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.  
+9.	Carson Sievert (2018) plotly for R. https://plotly-r.com   
+10.	Burchell Nursery, Walnuts, Accessed 21 August 2019, Source: http://www.burchellnursery.com/store/nut-trees/walnuts.html  
+11.	Walnuts Australia training documents, Walnuts Australia, Printed 2016  
+12.	AgriFutures Walnuts, 24 May 2017, Accessed 21 August 2019, Source https://www.agrifutures.com.au/farm-diversity/walnuts/  
+13.	Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2019). dplyr: A Grammar of Data Manipulation. R package  version 0.8.1. https://CRAN.R-project.org/package=dplyr  
+14.	Michael Hahsler and Matthew Piekenbrock (2018). dbscan: Density Based Clustering of Applications with Noise (DBSCAN) and Related Algorithms. R package version 1.1-3. https://CRAN.R-project.org/package=dbscan  
+15.	H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.  
+16.	Karline Soetaert (2017). plot3D: Plotting Multi-Dimensional Data. R package version 1.1.1.  https://CRAN.R-project.org/package=plot3D  
+17.	Carson Sievert (2018) plotly for R. https://plotly-r.com  
+18.	Venables, W. N. & Ripley, B. D. (2002) Modern Applied Statistics with S. Fourth Edition. Springer, New York. ISBN  0-387-95457-0  
+19.	Sing T, Sander O, Beerenwinkel N, Lengauer T (2005). “ROCR: visualizing classifier performance in R.” _Bioinformatics_, *21*(20), 7881. <URL: http://rocr.bioinf.mpi-sb.mpg.de>.  
+20.	Hadley Wickham and Lionel Henry (2019). tidyr: Easily Tidy Data with 'spread()' and 'gather()' Functions. R package  version 0.8.3. https://CRAN.R-project.org/package=tidyr
+Max Kuhn. Contributions from Jed Wing, Steve Weston, Andre Williams, Chris Keefer, Allan Engelhardt, Tony Cooper, Zachary Mayer, Brenton Kenkel, the R Core Team, Michael Benesty, Reynald Lescarbeau, Andrew Ziem, Luca Scrucca,  Yuan Tang, Can Candan and Tyler Hunt. (2019). caret: Classification and Regression Training. R package version 6.0-84. https://CRAN.R-project.org/package=caret  
+
+```{r references, echo=FALSE}
+#citation(package = "dbscan")
+#citation(package = "reshape2")
+#citation(package = "ggplot2")
+#citation(package = "plot3D")
+#citation(package = "plotly")
+#citation(package = "class")
+#citation(package = "ROCR")
+#citation(package = "dplyr")
+#citation(package = "tidyr")
+#citation(package = "MASS")
+#citation(package = "caret")
+#RStudio.Version()
+```
